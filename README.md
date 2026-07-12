@@ -15,8 +15,29 @@ pip install "linxiv[cli]"
 | `linxiv`     | `linxiv-app`   | Tauri desktop app   |
 | `linxiv-cli` | `linxiv-cli`   | Command-line client |
 
-All arguments pass through to the Rust binary. The Python layer will
-eventually mirror the Rust API; for now it only launches.
+All arguments pass through to the Rust binary.
+
+## Python API
+
+`linxiv.Linxiv` mirrors the linXiv MCP/CLI surface; each method is one
+`linxiv-cli` call returning parsed JSON. Errors raise `linxiv.LinxivError`.
+
+```python
+from linxiv import Linxiv
+
+lx = Linxiv()                      # or Linxiv(data_dir="~/my-library")
+results = lx.search_papers("quantum decoherence", max_results=5)
+paper = lx.fetch_paper("2204.12985")           # saves + returns the record
+proj = lx.create_project("thesis", tags=["qft"])
+lx.add_paper_to_project(proj["id"], paper["source_id"])
+lx.create_note(paper["source_id"], "Key result in §3", project_id=proj["id"])
+```
+
+Method groups: papers (search/fetch/list/get/repair/delete/restore),
+tags, projects (incl. export/import, bibtex/obsidian), notes, annotations,
+PDFs, trash, authors, DOI, settings, stats, backup/restore.
+`Linxiv(data_dir=...)` sets `LINXIV_DATA_DIR`; default is the same library
+the desktop app uses — avoid concurrent writes while the app is running.
 
 ## Building a wheel
 

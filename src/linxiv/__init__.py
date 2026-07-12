@@ -1,8 +1,13 @@
-"""Thin launcher for linXiv: exec the Rust binary bundled in this wheel."""
+"""Thin launcher for linXiv: exec the Rust binary bundled in this wheel.
+
+Programmatic use: `from linxiv import Linxiv`.
+"""
 
 import os
 import subprocess
 import sys
+
+from .api import Linxiv, LinxivError  # noqa: F401
 
 _BIN = os.path.join(os.path.dirname(__file__), "bin")
 
