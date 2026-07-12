@@ -1,0 +1,5 @@
+__pycache__/
+src/linxiv/bin/
+*.egg-info/
+build/
+dist/

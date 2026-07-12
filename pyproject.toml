@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "linxiv"
+version = "0.1.0"
+description = "Thin launcher for linXiv — ships and runs the prebuilt Rust binaries"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Jake Uribe" }]
+urls = { Homepage = "https://github.com/jakeuribe/linXiv" }
+
+# Extras are opt-in markers only: every wrapper script installs regardless,
+# and both binaries ship in the wheel.
+[project.optional-dependencies]
+app = []
+cli = []
+
+[project.scripts]
+linxiv = "linxiv:app"
+linxiv-cli = "linxiv:cli"
+
+[tool.setuptools.package-data]
+linxiv = ["bin/*"]
