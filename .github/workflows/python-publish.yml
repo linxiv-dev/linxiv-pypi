@@ -1,24 +1,34 @@
-# This workflow will upload a Python Package to PyPI when a release is created
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python#publishing-to-package-registries
-
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
+# Builds platform wheels that bundle the linXiv Rust binaries, then publishes
+# to PyPI via trusted publishing. No sdist: this package has no build-from-
+# source story (the binaries come from a linXiv GitHub release).
 name: Upload Python Package
 
 on:
   release:
     types: [published]
-
-permissions:
-  contents: read
+  workflow_dispatch:
+    inputs:
+      linxiv_tag:
+        description: "linXiv release tag to pull binaries from (e.g. v0.2.0)"
+        required: true
 
 jobs:
-  release-build:
-    runs-on: ubuntu-latest
-
+  build-wheels:
+    name: wheel (${{ matrix.triple }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+            exe: ""
+          - os: macos-latest
+            triple: aarch64-apple-darwin
+            exe: ""
+          - os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            exe: ".exe"
     steps:
       - uses: actions/checkout@v4
 
@@ -26,45 +36,70 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Build release distributions
+      # Convention: this repo's release tag == the linXiv tag whose binaries
+      # we bundle, and pyproject.toml's version matches it.
+      - name: Resolve linXiv tag and check version sync
+        shell: bash
         run: |
-          # NOTE: put your own distribution build steps here.
-          python -m pip install build
-          python -m build
+          tag="${{ github.event.release.tag_name || inputs.linxiv_tag }}"
+          ver=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "v$ver" != "$tag" ]; then
+            echo "::error::pyproject.toml version ($ver) does not match tag ($tag)"
+            exit 1
+          fi
+          echo "LINXIV_TAG=$tag" >> "$GITHUB_ENV"
 
-      - name: Upload distributions
-        uses: actions/upload-artifact@v4
+      - name: Download linXiv binaries
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p src/linxiv/bin
+          gh release download "$LINXIV_TAG" -R linxiv-dev/linXiv -D src/linxiv/bin \
+            -p "linxiv-app-${{ matrix.triple }}${{ matrix.exe }}" \
+            -p "linxiv-cli-${{ matrix.triple }}${{ matrix.exe }}"
+          cd src/linxiv/bin
+          mv "linxiv-app-${{ matrix.triple }}${{ matrix.exe }}" "linxiv-app${{ matrix.exe }}"
+          mv "linxiv-cli-${{ matrix.triple }}${{ matrix.exe }}" "linxiv-cli${{ matrix.exe }}"
+          chmod +x linxiv-app* linxiv-cli*
+
+      - name: Build wheel
+        shell: bash
+        run: |
+          python -m pip install --upgrade build wheel
+          python -m build --wheel
+
+      # linXiv release binaries are built on ubuntu-22.04 (glibc 2.35).
+      - name: Retag Linux wheel as manylinux
+        if: runner.os == 'Linux'
+        run: python -m wheel tags --remove --platform-tag manylinux_2_35_x86_64 dist/*linux_x86_64.whl
+
+      - name: Run tests against the wheel
+        shell: bash
+        run: |
+          python -m pip install dist/*.whl
+          python test_linxiv.py
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: release-dists
-          path: dist/
+          name: wheels-${{ matrix.triple }}
+          path: dist/*.whl
 
   pypi-publish:
     runs-on: ubuntu-latest
-    needs:
-      - release-build
+    needs: build-wheels
     permissions:
-      # IMPORTANT: this permission is mandatory for trusted publishing
+      # Mandatory for trusted publishing
       id-token: write
-
-    # Dedicated environments with protections for publishing are strongly recommended.
-    # For more information, see: https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment#deployment-protection-rules
     environment:
       name: pypi
-      # OPTIONAL: uncomment and update to include your PyPI project URL in the deployment status:
-      # url: https://pypi.org/p/YOURPROJECT
-      #
-      # ALTERNATIVE: if your GitHub Release name is the PyPI project version string
-      # ALTERNATIVE: exactly, uncomment the following line instead:
-      # url: https://pypi.org/project/YOURPROJECT/${{ github.event.release.name }}
-
+      url: https://pypi.org/p/linxiv
     steps:
-      - name: Retrieve release distributions
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: release-dists
           path: dist/
+          merge-multiple: true
 
-      - name: Publish release distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
