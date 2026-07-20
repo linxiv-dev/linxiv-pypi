@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,9 +8,29 @@ version = "0.2.0"
 description = "Thin launcher for linXiv — ships and runs the prebuilt Rust binaries"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "GPL-3.0-or-later" }
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 authors = [{ name = "Jake Uribe" }]
-urls = { Homepage = "https://github.com/jakeuribe/linXiv" }
+keywords = ["arxiv", "papers", "research", "reference-manager", "bibtex"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.urls]
+Homepage = "https://github.com/linxiv-dev/linXiv"
+Repository = "https://github.com/linxiv-dev/linXiv"
+Issues = "https://github.com/linxiv-dev/linXiv/issues"
 
 # Extras are opt-in markers only: every wrapper script installs regardless,
 # and both binaries ship in the wheel.
