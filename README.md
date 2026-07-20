@@ -17,6 +17,20 @@ pip install "linxiv[cli]"
 
 All arguments pass through to the Rust binary.
 
+## Supported platforms
+
+- **Linux (x86_64)**: the wheel is tagged with the glibc floor measured from
+  the bundled binaries (currently `manylinux_2_35_x86_64` — glibc >= 2.35,
+  the ubuntu-22.04 build floor). `linxiv-cli` needs only glibc. The `linxiv`
+  GUI additionally requires system libraries that manylinux does not cover:
+  GTK 3, WebKitGTK 4.1 (`libwebkit2gtk-4.1`), libsoup 3, and OpenSSL 3 —
+  install them from your distro (Debian/Ubuntu: `libwebkit2gtk-4.1-0`,
+  Fedora: `webkit2gtk4.1`).
+- **macOS (arm64)**: built on GitHub's `macos-latest` runner; the wheel's
+  platform tag reflects that runner's default deployment target. Intel Macs
+  are not supported.
+- **Windows (x86_64)**: standard MSVC build, no extra runtime requirements.
+
 ## Python API
 
 `linxiv.Linxiv` mirrors the linXiv MCP/CLI surface; each method is one
@@ -50,8 +64,9 @@ pip wheel --no-deps -w dist .
 ```
 
 For PyPI upload, retag the Linux wheel with a manylinux tag matching the
-build machine's glibc, e.g.:
+highest `GLIBC_*` symbol version the binaries require (what CI does):
 
 ```sh
-python -m wheel tags --platform-tag manylinux_2_34_x86_64 dist/linxiv-*-linux_x86_64.whl
+objdump -T src/linxiv/bin/linxiv-* | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1
+python -m wheel tags --platform-tag manylinux_2_35_x86_64 dist/linxiv-*-linux_x86_64.whl
 ```

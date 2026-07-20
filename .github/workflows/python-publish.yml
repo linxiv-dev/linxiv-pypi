@@ -63,16 +63,34 @@ jobs:
           mv "linxiv-cli-${{ matrix.triple }}${{ matrix.exe }}" "linxiv-cli${{ matrix.exe }}"
           chmod +x linxiv-app* linxiv-cli*
 
+      # macOS wheels keep the runner's default platform tag (e.g.
+      # macosx_14_0_arm64). Assumption: upstream builds on macos-latest with no
+      # MACOSX_DEPLOYMENT_TARGET set, so the binaries' minimum OS is whatever
+      # that runner's SDK defaults to; we don't inspect the Mach-O load
+      # commands here, so we don't claim anything older.
       - name: Build wheel
         shell: bash
         run: |
           python -m pip install --upgrade build wheel
           python -m build --wheel
 
-      # linXiv release binaries are built on ubuntu-22.04 (glibc 2.35).
+      # Derive the manylinux tag from the glibc symbol versions the bundled
+      # binaries actually require (ubuntu-22.04 upstream builds -> 2.35), so
+      # the tag stays honest if the upstream builder changes.
+      # Caveat: manylinux formally also forbids linking non-whitelisted shared
+      # libs, and linxiv-app links system GTK 3, WebKitGTK 4.1, libsoup 3 and
+      # OpenSSL 3. We keep the glibc-derived tag anyway — linxiv-cli is fully
+      # covered by it, and the GUI's extra runtime deps are documented in
+      # README.md "Supported platforms".
       - name: Retag Linux wheel as manylinux
         if: runner.os == 'Linux'
-        run: python -m wheel tags --remove --platform-tag manylinux_2_35_x86_64 dist/*linux_x86_64.whl
+        run: |
+          glibc=$(objdump -T src/linxiv/bin/linxiv-app src/linxiv/bin/linxiv-cli \
+            | grep -o 'GLIBC_[0-9]*\.[0-9]*' | sort -Vu | tail -1)
+          ver=${glibc#GLIBC_}
+          tag="manylinux_${ver//./_}_x86_64"
+          echo "Measured glibc floor: $glibc -> $tag"
+          python -m wheel tags --remove --platform-tag "$tag" dist/*linux_x86_64.whl
 
       - name: Run tests against the wheel
         shell: bash
