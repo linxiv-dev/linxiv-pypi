@@ -18,12 +18,21 @@ def _client(**responses):
 
 
 def test_execs_bundled_binary():
+    # windows launches via subprocess.run + sys.exit; unix via os.execv —
+    # mock BOTH so no platform ever runs the real binary
     with mock.patch("os.path.exists", return_value=True), \
          mock.patch("os.execv") as execv, \
+         mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)) as run, \
          mock.patch.object(sys, "argv", ["linxiv-cli", "search", "qft"]):
-        linxiv.cli()
-    exe = os.path.join(linxiv._BIN, "linxiv-cli")
-    execv.assert_called_once_with(exe, [exe, "search", "qft"])
+        try:
+            linxiv.cli()
+        except SystemExit:
+            pass
+    exe = os.path.join(linxiv._BIN, "linxiv-cli" + (".exe" if os.name == "nt" else ""))
+    if os.name == "nt":
+        run.assert_called_once_with([exe, "search", "qft"])
+    else:
+        execv.assert_called_once_with(exe, [exe, "search", "qft"])
 
 
 def test_exits_when_binary_missing():
