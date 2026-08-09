@@ -32,6 +32,34 @@ jobs:
 
       # /releases/latest already excludes drafts and prereleases, so a tagged
       # release-candidate upstream won't drag this package along with it.
+      #
+      # UPGRADE — once linXiv starts cutting stable releases with prerelease
+      # channels alongside them (v0.5.0-rc.1 and friends), this workflow only
+      # tracks the stable line and silently ignores every rc. If you then want
+      # testers to get `pip install --pre linxiv`, four things have to change
+      # together — do not do them piecemeal:
+      #
+      #   1. Here: swap /releases/latest for `gh api repos/.../releases` (that
+      #      endpoint DOES include prereleases) and pick the newest entry
+      #      yourself, still skipping `.draft`.
+      #   2. Tag -> version mapping: upstream `v0.5.0-rc.1` is not a valid PEP
+      #      440 version. It has to become `0.5.0rc1`, which breaks the
+      #      `v$ver == $tag` invariant that python-publish.yml enforces at
+      #      lines 41-50. That check needs to compare a normalized form, and
+      #      this repo's tags then stop matching upstream's verbatim.
+      #   3. The `sort -V` forward-check in "Compare against packaged version"
+      #      becomes WRONG, not just imprecise. GNU version sort ranks
+      #      `0.4.0rc1` ABOVE `0.4.0`; PEP 440 ranks it below. Verified:
+      #      `printf '0.4.0\n0.4.0rc1\n' | sort -V | tail -1` -> 0.4.0rc1.
+      #      Left as-is, publishing 0.4.0 final after 0.4.0rc1 looks like a
+      #      version regression and the workflow hard-fails. Replace it with
+      #      `packaging.version.Version` comparison in Python.
+      #   4. Bump `Development Status :: 3 - Alpha` in pyproject.toml.
+      #
+      # Note that only (3) is silently dangerous — (2) fails loudly, and (1)
+      # and (4) are inert until you make them. If you only ever cut stable
+      # releases upstream, none of this applies and the workflow is already
+      # correct as written.
       - name: Resolve latest upstream release
         id: upstream
         env:

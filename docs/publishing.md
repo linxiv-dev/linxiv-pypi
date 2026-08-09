@@ -70,6 +70,28 @@ uploading — that POSTs a `repository_dispatch` to this repo:
 
 Nothing in this repo changes; `sync-linxiv.yml` already listens for it.
 
+## Upgrading for stable releases + prerelease channels
+
+Today this package tracks linXiv's stable line only: `/releases/latest` excludes
+drafts and prereleases, so an upstream `v0.5.0-rc.1` is ignored entirely. That is
+the right behaviour while linXiv is alpha and every release is the release.
+
+Once linXiv starts cutting stable releases with rc/beta tags alongside them and
+you want testers on `pip install --pre linxiv`, four changes have to land
+together — there's a full breakdown in the `UPGRADE` comment at the top of
+`sync-linxiv.yml`'s "Resolve latest upstream release" step. Summary:
+
+1. Query `/releases` (includes prereleases) instead of `/releases/latest`.
+2. Normalize tags to PEP 440 — `v0.5.0-rc.1` → `0.5.0rc1`. This breaks the
+   `version == tag` invariant `python-publish.yml` enforces.
+3. Replace the `sort -V` forward-check with `packaging.version.Version`.
+4. Bump the `Development Status` classifier in `pyproject.toml`.
+
+Step 3 is the one that bites silently. GNU version sort ranks `0.4.0rc1` *above*
+`0.4.0`, while PEP 440 ranks it below — so publishing `0.4.0` final after
+`0.4.0rc1` would look like a version regression and hard-fail the sync. Steps 1
+and 4 are inert until you make them, and step 2 fails loudly.
+
 ## Manual release
 
 Either path still works:
