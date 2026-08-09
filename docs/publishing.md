@@ -20,21 +20,63 @@ trusted publisher at <https://pypi.org/manage/account/publishing/> with exactly:
 The first successful publish creates the project and converts the pending
 publisher into a regular one.
 
+> **Do not move the publish job out of `python-publish.yml`.** PyPI validates
+> the OIDC `job_workflow_ref` claim against the workflow filename above, and it
+> does not support reusable workflows — a job that publishes from a
+> `workflow_call` file fails with `invalid-publisher`. Other workflows must
+> *dispatch* `python-publish.yml`, not absorb its publish job.
+
 ## Prerequisite
 
 linXiv releases must contain the raw binary assets
-(`linxiv-app-<triple>` / `linxiv-cli-<triple>`, `.exe` suffix on Windows) —
-added by linxiv-dev/linXiv PR #164. The first publishable release is the one
-cut after that PR merges.
+(`linxiv-app-<triple>` / `linxiv-cli-<triple>`, `.exe` suffix on Windows).
+`sync-linxiv.yml` verifies all six are present before opening a bump PR, so an
+incomplete upstream release fails early rather than midway through the wheel
+matrix.
 
-## Release flow
+## Release flow (automated)
 
-1. Bump `version` in `pyproject.toml` to match the linXiv release
-   (e.g. `0.2.0`). Commit.
-2. Create a GitHub release on `linxiv-dev/linxiv-pypi` tagged `vX.Y.Z` — the
-   same tag as the linXiv release whose binaries get bundled. The workflow
-   enforces `version == tag` and downloads the `linxiv-{app,cli}-<triple>`
-   assets from `linxiv-dev/linXiv` at that tag.
+Releases follow linXiv automatically, gated on one human merge:
 
-Alternatively, run the workflow manually (Actions → "Upload Python Package" →
-Run workflow) with the linXiv tag as the `linxiv_tag` input.
+1. **`sync-linxiv.yml`** polls `linxiv-dev/linXiv` daily (and on manual dispatch,
+   or a `linxiv-released` `repository_dispatch`). When `/releases/latest` — which
+   excludes drafts and prereleases — reports a newer tag than `pyproject.toml`,
+   it verifies the six binaries exist, bumps `version`, and opens a PR.
+2. **You review and merge that PR.** This is the ship gate. PyPI versions cannot
+   be reused, so close the PR instead of merging if anything looks wrong.
+3. **`release-on-merge.yml`** fires on a `pyproject.toml` change landing on
+   `main`. If `vX.Y.Z` isn't already released, it tags the merge commit, creates
+   the GitHub release, and dispatches `python-publish.yml` with `linxiv_tag`.
+4. **`python-publish.yml`** builds the three platform wheels, runs
+   `test_linxiv.py` against each, and uploads to PyPI.
+
+Step 3 dispatches rather than relying on the `release: published` trigger
+because releases created with the default `GITHUB_TOKEN` do not start other
+workflow runs; `workflow_dispatch` is an explicit exception to that rule. This
+also guarantees exactly one publish run per release rather than two.
+
+### Making it instant instead of daily
+
+Add a step to linXiv's release workflow — after the binary assets finish
+uploading — that POSTs a `repository_dispatch` to this repo:
+
+```yaml
+- env:
+    GH_TOKEN: ${{ secrets.PYPI_REPO_DISPATCH_TOKEN }} # PAT/App token, write access to linxiv-pypi
+  run: |
+    gh api repos/linxiv-dev/linxiv-pypi/dispatches \
+      -f event_type=linxiv-released
+```
+
+Nothing in this repo changes; `sync-linxiv.yml` already listens for it.
+
+## Manual release
+
+Either path still works:
+
+- Bump `version` in `pyproject.toml`, commit to `main`, and let
+  `release-on-merge.yml` do the rest.
+- Or cut a GitHub release tagged `vX.Y.Z` by hand — `python-publish.yml` keeps
+  its `release: published` trigger. It enforces `version == tag`.
+- Or run it directly (Actions → "Upload Python Package" → Run workflow) with
+  the linXiv tag as the `linxiv_tag` input.

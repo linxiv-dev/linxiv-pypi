@@ -1,0 +1,79 @@
+# Ships whatever version lands in pyproject.toml on main: tags it, cuts the
+# GitHub release, and kicks off the publish workflow.
+#
+# Why dispatch instead of letting `on: release` fire? Releases created with the
+# default GITHUB_TOKEN do not trigger other workflows. workflow_dispatch is an
+# explicit exception to that rule, so this reaches python-publish.yml without
+# needing a PAT. It also means exactly one publish run happens, not two.
+#
+# python-publish.yml deliberately keeps its own `release: published` trigger for
+# releases cut by hand in the UI. Its publish job must stay in that file —
+# PyPI's trusted publishing validates the job_workflow_ref claim and does not
+# support reusable workflows, so this workflow calls it rather than absorbing it.
+name: Release on merge
+
+on:
+  push:
+    branches: [main]
+    paths: [pyproject.toml]
+
+permissions:
+  contents: write # create the tag and release
+  actions: write # dispatch python-publish.yml
+
+concurrency:
+  group: release-on-merge
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read packaged version
+        id: version
+        run: |
+          set -euo pipefail
+          ver=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "tag=v$ver" >> "$GITHUB_OUTPUT"
+
+      # pyproject.toml changes for reasons other than a version bump (classifiers,
+      # metadata). Only an unreleased version is a ship signal.
+      - name: Skip if already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$TAG is already released; nothing to do."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release and publish
+        if: steps.check.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Unquoted heredoc: $TAG/$VERSION expand, backticks stay literal.
+          cat > "$RUNNER_TEMP/notes.md" <<EOF
+          Wheels bundling the [linXiv \`$TAG\`](https://github.com/linxiv-dev/linXiv/releases/tag/$TAG) binaries.
+
+          Install with \`pip install linxiv==$VERSION\`.
+          EOF
+
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/notes.md"
+
+          gh workflow run python-publish.yml --ref main -f linxiv_tag="$TAG"
+          echo "Dispatched python-publish.yml for $TAG."

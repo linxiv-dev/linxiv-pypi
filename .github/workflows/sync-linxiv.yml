@@ -1,0 +1,149 @@
+# Watches linxiv-dev/linXiv for new releases and opens a PR bumping this
+# package's version to match. Merging that PR is the ship gate: see
+# release-on-merge.yml, which tags and dispatches the publish workflow.
+#
+# Pull-based on purpose — no cross-repo credentials needed to read a public
+# repo's releases. If you later want releases to propagate instantly instead of
+# waiting for the daily poll, add a step to linXiv's release workflow that POSTs
+# a repository_dispatch with event_type "linxiv-released" (that needs a PAT or
+# App token with write access to *this* repo). Nothing here has to change.
+name: Sync linXiv release
+
+on:
+  schedule:
+    - cron: "23 9 * * *" # daily
+  workflow_dispatch: {}
+  repository_dispatch:
+    types: [linxiv-released]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-linxiv
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # /releases/latest already excludes drafts and prereleases, so a tagged
+      # release-candidate upstream won't drag this package along with it.
+      - name: Resolve latest upstream release
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/linxiv-dev/linXiv/releases/latest > "$RUNNER_TEMP/release.json"
+          tag=$(jq -r .tag_name "$RUNNER_TEMP/release.json")
+          echo "Latest upstream release: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      # Bail before opening a PR if upstream's release is missing binaries.
+      # Without this the failure surfaces later, mid-matrix, after a tag and a
+      # GitHub release already exist here.
+      - name: Verify all wheel binaries were published upstream
+        run: |
+          set -euo pipefail
+          missing=0
+          for asset in \
+            linxiv-app-x86_64-unknown-linux-gnu \
+            linxiv-cli-x86_64-unknown-linux-gnu \
+            linxiv-app-aarch64-apple-darwin \
+            linxiv-cli-aarch64-apple-darwin \
+            linxiv-app-x86_64-pc-windows-msvc.exe \
+            linxiv-cli-x86_64-pc-windows-msvc.exe
+          do
+            if jq -e --arg a "$asset" 'any(.assets[]; .name == $a)' "$RUNNER_TEMP/release.json" > /dev/null; then
+              echo "  ok      $asset"
+            else
+              echo "  MISSING $asset"
+              missing=1
+            fi
+          done
+          if [ "$missing" = 1 ]; then
+            echo "::error::${{ steps.upstream.outputs.tag }} is missing binaries; not opening a bump PR."
+            exit 1
+          fi
+
+      - name: Compare against packaged version
+        id: compare
+        env:
+          UPSTREAM: ${{ steps.upstream.outputs.version }}
+        run: |
+          set -euo pipefail
+          current=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "packaged=$current upstream=$UPSTREAM"
+
+          if [ "$current" = "$UPSTREAM" ]; then
+            echo "Already in sync."
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Guard against a yanked or re-pointed upstream "latest" walking the
+          # version backwards — PyPI would reject the upload anyway, but this
+          # fails loudly instead of opening a nonsense PR.
+          newest=$(printf '%s\n%s\n' "$current" "$UPSTREAM" | sort -V | tail -1)
+          if [ "$newest" != "$UPSTREAM" ]; then
+            echo "::error::Upstream latest ($UPSTREAM) is older than packaged version ($current)."
+            exit 1
+          fi
+
+          echo "bump=true" >> "$GITHUB_OUTPUT"
+
+      - name: Bump pyproject.toml
+        if: steps.compare.outputs.bump == 'true'
+        env:
+          UPSTREAM: ${{ steps.upstream.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os, re, pathlib
+          version = os.environ["UPSTREAM"]
+          path = pathlib.Path("pyproject.toml")
+          src = path.read_text()
+          new, count = re.subn(
+              r'^version = "[^"]*"$', f'version = "{version}"', src, count=1, flags=re.M
+          )
+          if count != 1:
+              raise SystemExit("could not locate the version line in pyproject.toml")
+          path.write_text(new)
+          PY
+          git diff --stat
+
+      - name: Open bump PR
+        if: steps.compare.outputs.bump == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.upstream.outputs.tag }}
+          UPSTREAM: ${{ steps.upstream.outputs.version }}
+        run: |
+          set -euo pipefail
+          branch="bump-linxiv-$TAG"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -am "chore: bump to $UPSTREAM (linXiv $TAG binaries)"
+          git push -f origin "$branch"
+
+          # Unquoted heredoc: $TAG/$UPSTREAM expand, backticks stay literal.
+          cat > "$RUNNER_TEMP/pr-body.md" <<EOF
+          Automated: linxiv-dev/linXiv published [\`$TAG\`](https://github.com/linxiv-dev/linXiv/releases/tag/$TAG).
+
+          All six platform binaries were verified present on that release.
+
+          **Merging this PR publishes \`linxiv $UPSTREAM\` to PyPI.** On merge, \`release-on-merge.yml\` tags \`$TAG\`, creates the GitHub release, and dispatches \`python-publish.yml\`, which builds the wheels, runs \`test_linxiv.py\` against each one, and uploads.
+
+          PyPI versions cannot be reused — if something looks off, close this PR rather than merging it.
+          EOF
+
+          gh pr create \
+            --title "chore: bump to $UPSTREAM (linXiv $TAG binaries)" \
+            --head "$branch" --base main \
+            --body-file "$RUNNER_TEMP/pr-body.md" \
+            || echo "PR already exists for $branch; branch updated."
