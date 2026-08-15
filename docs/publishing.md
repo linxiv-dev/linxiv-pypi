@@ -29,10 +29,17 @@ publisher into a regular one.
 ## Prerequisite
 
 linXiv releases must contain the raw binary assets
-(`linxiv-app-<triple>` / `linxiv-cli-<triple>`, `.exe` suffix on Windows).
-`sync-linxiv.yml` verifies all six are present before opening a bump PR, so an
-incomplete upstream release fails early rather than midway through the wheel
-matrix.
+(`raw-linxiv-app-<triple>` / `raw-linxiv-cli-<triple>`, `.exe` suffix on
+Windows). `sync-linxiv.yml` verifies all six are present before opening a bump
+PR, so an incomplete upstream release fails early rather than midway through
+the wheel matrix.
+
+The `raw-` prefix arrived after linXiv v0.4.0: GitHub lists release assets in
+filename order and ignores upload time, so the unprefixed names sorted into the
+middle of the installer list. Both `sync-linxiv.yml` and `python-publish.yml`
+accept either spelling, because publishing can be re-run against any older tag
+and those still carry the bare names. Keep both accepted until no supported tag
+predates the rename.
 
 ## Release flow (automated)
 
