@@ -79,6 +79,8 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
+          # Upstream prefixed these with `raw-` so they sort below the
+          # installers; older releases still carry the bare name. Either counts.
           for asset in \
             linxiv-app-x86_64-unknown-linux-gnu \
             linxiv-cli-x86_64-unknown-linux-gnu \
@@ -87,10 +89,12 @@ jobs:
             linxiv-app-x86_64-pc-windows-msvc.exe \
             linxiv-cli-x86_64-pc-windows-msvc.exe
           do
-            if jq -e --arg a "$asset" 'any(.assets[]; .name == $a)' "$RUNNER_TEMP/release.json" > /dev/null; then
+            if jq -e --arg a "$asset" --arg r "raw-$asset" \
+                 'any(.assets[]; .name == $a or .name == $r)' \
+                 "$RUNNER_TEMP/release.json" > /dev/null; then
               echo "  ok      $asset"
             else
-              echo "  MISSING $asset"
+              echo "  MISSING $asset (looked for raw-$asset too)"
               missing=1
             fi
           done

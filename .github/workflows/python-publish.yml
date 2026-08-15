@@ -54,13 +54,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          suffix="${{ matrix.triple }}${{ matrix.exe }}"
           mkdir -p src/linxiv/bin
+          # Upstream gave these a `raw-` prefix so they sort below the
+          # installers on the release page. This job also runs against older
+          # tags, which still carry the bare names, so ask for both and take
+          # whichever the tag actually has. Unmatched patterns are fine; gh
+          # only fails when NO pattern matches.
           gh release download "$LINXIV_TAG" -R linxiv-dev/linXiv -D src/linxiv/bin \
-            -p "linxiv-app-${{ matrix.triple }}${{ matrix.exe }}" \
-            -p "linxiv-cli-${{ matrix.triple }}${{ matrix.exe }}"
+            -p "raw-linxiv-app-$suffix" -p "raw-linxiv-cli-$suffix" \
+            -p "linxiv-app-$suffix"     -p "linxiv-cli-$suffix"
           cd src/linxiv/bin
-          mv "linxiv-app-${{ matrix.triple }}${{ matrix.exe }}" "linxiv-app${{ matrix.exe }}"
-          mv "linxiv-cli-${{ matrix.triple }}${{ matrix.exe }}" "linxiv-cli${{ matrix.exe }}"
+          for tool in app cli; do
+            dest="linxiv-$tool${{ matrix.exe }}"
+            if   [ -f "raw-linxiv-$tool-$suffix" ]; then mv "raw-linxiv-$tool-$suffix" "$dest"
+            elif [ -f "linxiv-$tool-$suffix" ];     then mv "linxiv-$tool-$suffix"     "$dest"
+            else
+              echo "::error::$LINXIV_TAG has neither raw-linxiv-$tool-$suffix nor linxiv-$tool-$suffix"
+              exit 1
+            fi
+          done
           chmod +x linxiv-app* linxiv-cli*
 
       # macOS wheels keep the runner's default platform tag (e.g.
